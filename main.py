@@ -60,9 +60,16 @@ async def on_message(message):
                     local_filename = f"temp_{attachment.id}.ogg"
                     
                     # 1. 音声ファイルをNASのローカルにダウンロード
-                    # ※ urllib.request は同期処理なので、ブロックを防ぐためにスレッドプールで動かすのが理想ですが、
-                    # 今回は数MB程度なのでシンプルに記述しています。
-                    urllib.request.urlretrieve(attachment.url, local_filename)
+                    # ※ urllib.request は同期処理なので、ブロックを防ぐためにスレッドプールで動かすのが理想ですが、今回は数MB程度なのでシンプルに記述しています。
+
+                    # ブラウザ（Chrome）からのアクセスに見せかけるための設定を追加
+                    req = urllib.request.Request(
+                        attachment.url, 
+                        headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+                    )
+                    # ヘッダー情報を持たせて安全にダウンロードを実行
+                    with urllib.request.urlopen(req) as response, open(local_filename, 'wb') as out_file:
+                        out_file.write(response.read())
                     print(f"ファイルをダウンロードしました: {local_filename}")
 
                     # 2. Whisperによる文字起こしの実行
