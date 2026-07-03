@@ -8,8 +8,8 @@
 
 ## 使い方
 
-1. `docker-compose.yml`に以下を記述する。
-2. `.env`ファイルに環境変数`DISCORD_BOT_TOKEN`として、[Discord Developer Portal](https://discord.com/developers/home)から取得したBotトークンを記載する。
+1. Dockerアプリ＞プロジェクト＞Compose設定（`docker-compose.yml`）に以下を記述する。
+2. `.env`ファイルを新規作成し、環境変数`DISCORD_BOT_TOKEN`として[Discord Developer Portal](https://discord.com/developers/home)から取得したBotトークンを記載する。
 3. `.env`ファイルを`docker-compose.yml`と同じフォルダに配置する。
 4. プロジェクトを起動する。
 
@@ -23,7 +23,7 @@ services:
     restart: always
     environment:
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
-      - PYTHONUNBUFFERED=1
+      - PYTHONUNBUFFERED=1 # Pythonのログを表示
     volumes:
       # Whisperのモデルデータが毎回消えないように、NASのローカルにキャッシュ用マウントを作る
       - ./whisper_cache:/root/.cache/huggingface
