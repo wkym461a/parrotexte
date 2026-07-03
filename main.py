@@ -20,15 +20,17 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    # メッセージに添付ファイルがあり、それがボイスメッセージかどうかを判定
-    # ※Discordの公式ボイスメモ機能で送られた場合、flags.voice_message が True になります
-    if message.attachments and message.flags.voice_message:
-        print(f"ボイスメッセージを検知しました。送信者: {message.author}")
+    # # メッセージに添付ファイルがあり、それがボイスメッセージかどうかを判定
+    # # ※Discordの公式ボイスメモ機能で送られた場合、flags.voice_message が True になります
+    # if message.attachments and message.flags.voice_message:
+    #     print(f"ボイスメッセージを検知しました。送信者: {message.author}")
         
-        # テスト用の固定メッセージを返信（ここに将来Whisperの処理が入ります）
-        await message.reply("ボイスメッセージを受け取ったよ！文字起こし機能は現在準備中です。")
+    #     # テスト用の固定メッセージを返信（ここに将来Whisperの処理が入ります）
+    #     await message.reply("ボイスメッセージを受け取ったよ！文字起こし機能は現在準備中です。")
 
-    # この記述を入れておくことで、将来的に !help などのコマンドを追加した際も正常に動作します
+    # # この記述を入れておくことで、将来的に !help などのコマンドを追加した際も正常に動作します
+    # await bot.process_commands(message)
+    await message.reply("メッセージを受け取ったよ！")
     await bot.process_commands(message)
 
 # 2. 環境変数からトークンを読み込んで起動
