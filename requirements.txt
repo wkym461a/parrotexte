@@ -1,3 +1,4 @@
 discord.py
 faster-whisper
 pydub
+requests
