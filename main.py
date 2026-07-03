@@ -34,13 +34,63 @@ async def on_ready():
 
 # 文字起こし処理は重いため、非同期処理(async)の中でブロックしないように別スレッドで実行する関数
 def transcribe_audio(file_path):
-    segments, info = model.transcribe(file_path, beam_size=5, language="ja")
+    segments, info = model.transcribe(
+        file_path, 
+        beam_size=5, 
+        language="ja",
+        initial_prompt="こんにちは。こちらはボイスメモの文字起こしです。お疲れ様です、よろしくお願いします。このように、句読点をつけて出力してください。"
+    )
     
     # 検出されたテキストを1つの文章に結合
     full_text = ""
     for segment in segments:
         full_text += segment.text
     return full_text
+
+# ローカルAI「ollama」に文字起こしした文章を校正してもらう処理
+# docker-compose内の別コンテナで「ollama」が立っている前提
+def proofreading_text_local(text):
+    # docker-compose内のサービス名「ollama」をホスト名として通信できます
+    ollama_url = "http://ollama:11434/v1/chat/completions"
+
+    headers = {
+        "Content-Type": "application/json"
+    }
+    
+    prompt = f"""
+【文字起こしテキスト】から下のテキストは、Discordのボイスメッセージを文字起こししたものです。
+未加工の文章のため、誤字脱字、改行の欠落、「あー」「えっと」などの余分な言葉（フィラー）が含まれています。
+以下のルールに従って人間が読みやすい綺麗な文章に校正・整形してください。
+　・「あー」「えっと」「なんか」などのフィラー（言い淀み）はすべて削除する。
+　・文脈から明らかに誤変換（誤字脱字）と思われる部分は正しい日本語に修正する。
+　・原則、一文ずつ改行する。話の切れ目で適切に空行を入れて段落分けを行う。
+　・内容に合わせてMarkdown記法による装飾を追加する。例えば、重要な強調部分は（**強調部分**）を付与する。
+　・元のテキストの内容は変えないこと。意味やニュアンスが変わらないようにする。
+※校正・整形したテキストだけを出力してください。他の文章や装飾をつけてはいけません。
+
+【文字起こしテキスト】
+{text}
+"""
+    # Ollamaに送るデータ
+    payload = {
+        "model": "gemma2:2b",  # 事前にダウンロードしたモデル名
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        "temperature": 0.3,
+    }
+
+    try:
+        response = requests.post(ollama_url, json=payload, headers=headers, timeout=600)
+        response.raise_for_status()
+        result = response.json()
+        return result["choices"][0]["message"]["content"] or "文章の校正・整形に失敗しました。"
+    except Exception as e:
+        print(f"Ollamaとの通信エラー: {e}")
+        return "❌ ローカルAIが応答しませんでした。"
 
 # ローカルAI「ollama」に文字起こしした文章のタイトルを考えてもらう処理
 # docker-compose内の別コンテナで「ollama」が立っている前提
@@ -73,10 +123,10 @@ def generate_title_local(text):
     }
 
     try:
-        response = requests.post(ollama_url, json=payload, headers=headers, timeout=60)
+        response = requests.post(ollama_url, json=payload, headers=headers, timeout=600)
         response.raise_for_status()
         result = response.json()
-        return result["choices"][0]["message"]["content"] or "要約の生成に失敗しました。"
+        return result["choices"][0]["message"]["content"] or "タイトルの生成に失敗しました。"
     except Exception as e:
         print(f"Ollamaとの通信エラー: {e}")
         return "❌ ローカルAIが応答しませんでした。"
@@ -99,7 +149,9 @@ class ObsidianSaveView(discord.ui.View):
             return
 
         # 2. 今日の日付のMarkdownファイル名を作成
-        now_time = datetime.datetime.now().strftime(r"%Y%m%d-%H%M%s")
+        # 💡 日本時間 (JST) のタイムゾーンを設定 (UTC+9時間)
+        JST = datetime.timezone(datetime.timedelta(hours=9))
+        now_time = datetime.datetime.now(JST).strftime(r"%Y%m%d-%H%M%S")
         file_name = f"{now_time}_{self.title_str}.md"
         file_path = os.path.join(obsidian_dir, file_name)
 
@@ -130,7 +182,7 @@ async def on_message(message):
     if message.attachments:
         # 添付ファイルがボイスメッセージかどうかを判定
         for attachment in message.attachments:
-            if attachment.is_voice_message():
+            if attachment.is_voice_message() or attachment.filename.lower().endswith('.ogg'):
                 print(f"ボイスメッセージを検知しました。送信者: {message.author}")
                 
                 # ユーザーに処理中であることを伝える（リアクションや一時メッセージ）
@@ -161,6 +213,9 @@ async def on_message(message):
                     # 3. 結果を返信
                     if transcribed_text.strip():
                         loop = asyncio.get_running_loop()
+                        transcribed_text = await loop.run_in_executor(None, proofreading_text_local, transcribed_text)
+                        transcribed_text = transcribed_text.strip()
+                        loop = asyncio.get_running_loop()
                         transcribed_title = await loop.run_in_executor(None, generate_title_local, transcribed_text)
                         transcribed_title = transcribed_title.strip()
                         reply_text = f"**📝 文字起こし結果:**\n\tタイトル:{transcribed_title}\n\t本文:{transcribed_text}"
@@ -171,20 +226,26 @@ async def on_message(message):
                             title=transcribed_title,
                             text=transcribed_text,
                         )
-                        await processing_msg.edit(content=reply_text,view=view)
+                        await message.reply(content=reply_text,view=view)
                     else:
                         reply_text = "⚠️ 音声は検知できましたが、文字に変換できませんでした。（無言、または雑音のみの可能性があります）"
-                        await processing_msg.edit(content=reply_text)
+                        await message.reply(content=reply_text)
 
                 except Exception as e:
                     print(f"エラーが発生しました: {e}")
-                    await processing_msg.edit(content="❌ 文字起こし中にエラーが発生しました。")
+                    await message.reply(content="❌ 文字起こし中にエラーが発生しました。")
                 
                 finally:
                     # サーバーの容量を圧迫しないよう、処理が終わったら一時ファイルを削除
                     if os.path.exists(local_filename):
                         os.remove(local_filename)
                         print(f"一時ファイルを削除しました: {local_filename}")
+                
+                # 「処理中」のメッセージの削除
+                try:
+                    await processing_msg.delete()
+                except Exception:
+                    pass
 
 
     # この記述を入れておくことで、将来的に !help などのコマンドを追加した際も正常に動作します
